@@ -118,3 +118,6 @@ DELETE FROM Systems WHERE Name = 'PostPriorityConfigDefaultTrueMigrationComplete
    It's safe to let these migrations run only in the server, so we can remove the Systems rows for diff. */
 DELETE FROM Systems WHERE Name = 'custom_groups_permissions';
 DELETE FROM Systems WHERE Name = 'custom_groups_permission_restore';
+
+
+UPDATE FROM Roles SET UpdateAt = 1;
