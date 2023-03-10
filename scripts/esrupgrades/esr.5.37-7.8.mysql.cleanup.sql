@@ -120,4 +120,4 @@ DELETE FROM Systems WHERE Name = 'custom_groups_permissions';
 DELETE FROM Systems WHERE Name = 'custom_groups_permission_restore';
 
 
-UPDATE FROM Roles SET UpdateAt = 1;
+UPDATE Roles SET UpdateAt = 1;
