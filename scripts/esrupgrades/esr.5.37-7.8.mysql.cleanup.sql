@@ -121,3 +121,68 @@ DELETE FROM Systems WHERE Name = 'custom_groups_permission_restore';
 
 
 UPDATE Roles SET UpdateAt = 1;
+
+
+SET group_concat_max_len = 18446744073709551615;
+
+DROP PROCEDURE IF EXISTS splitString;
+DROP PROCEDURE IF EXISTS sortPermissionsInRoles;
+
+DROP TEMPORARY TABLE IF EXISTS temp_roles;
+CREATE TEMPORARY TABLE temp_roles(id varchar(26), permissions longtext);
+
+DELIMITER //
+
+CREATE PROCEDURE splitString(
+  IN id varchar(26),
+  IN inputString longtext,
+  IN delimiterChar text
+)
+BEGIN
+  DECLARE idx INT DEFAULT 0;
+  SELECT TRIM(inputString) INTO inputString;
+  SELECT LOCATE(delimiterChar, inputString) INTO idx;
+  WHILE idx > 0 DO
+    INSERT INTO temp_roles SELECT id, LEFT(inputString, idx);
+    SELECT SUBSTR(inputString, idx+1) INTO inputString;
+    SELECT LOCATE(delimiterChar, inputString) INTO idx;
+  END WHILE;
+  INSERT INTO temp_roles(id, permissions) VALUES(id, inputString);
+END; //
+DELIMITER ;
+
+DELIMITER //
+CREATE PROCEDURE sortPermissionsInRoles()
+BEGIN
+  DECLARE done INT DEFAULT FALSE;
+  DECLARE rolesId varchar(26) DEFAULT '';
+  DECLARE rolesPermissions longtext DEFAULT '';
+  DECLARE cur1 CURSOR FOR SELECT Id, Permissions FROM Roles;
+  DECLARE CONTINUE HANDLER FOR NOT FOUND SET done = TRUE;
+
+  OPEN cur1;
+  read_loop: LOOP
+    FETCH cur1 INTO rolesId, rolesPermissions;
+    IF done THEN
+      LEAVE read_loop;
+    END IF;
+    CALL splitString(rolesId, rolesPermissions, ' ');
+  END LOOP;
+  CLOSE cur1;
+
+  UPDATE
+    Roles INNER JOIN (
+      SELECT temp_roles.id as Id, group_concat(temp_roles.permissions ORDER BY temp_roles.permissions SEPARATOR ' ') as Permissions
+        FROM Roles JOIN temp_roles ON Roles.Id = temp_roles.id
+        GROUP BY temp_roles.id
+    ) AS Sorted
+    ON Roles.Id = Sorted.Id
+    SET Roles.Permissions = Sorted.Permissions;
+END; //
+DELIMITER ;
+
+CALL sortPermissionsInRoles();
+
+DROP TEMPORARY TABLE IF EXISTS temp_roles;
+
+SET group_concat_max_len = 1024;
