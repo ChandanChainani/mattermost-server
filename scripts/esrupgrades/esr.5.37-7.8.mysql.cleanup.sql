@@ -140,14 +140,10 @@ CREATE PROCEDURE splitString(
 )
 BEGIN
   DECLARE idx INT DEFAULT 0;
-  DECLARE splitRole TEXT DEFAULT '';
   SELECT TRIM(inputString) INTO inputString;
   SELECT LOCATE(delimiterChar, inputString) INTO idx;
   WHILE idx > 0 DO
-    SET splitRole = TRIM(LEFT(inputString, idx));
-	IF splitRole NOT LIKE '%playbook%' AND splitRole NOT LIKE '%custom_group%' THEN
-		INSERT INTO temp_roles SELECT id, splitRole;
-	END IF;
+    INSERT INTO temp_roles SELECT id, TRIM(LEFT(inputString, idx));
     SELECT SUBSTR(inputString, idx+1) INTO inputString;
     SELECT LOCATE(delimiterChar, inputString) INTO idx;
   END WHILE;
@@ -173,6 +169,15 @@ BEGIN
     CALL splitString(rolesId, rolesPermissions, ' ');
   END LOOP;
   CLOSE cur1;
+
+  DELETE FROM temp_roles WHERE permissions LIKE 'sysconsole_read_products_boards';
+  DELETE FROM temp_roles WHERE permissions LIKE 'sysconsole_write_products_boards';
+  DELETE FROM temp_roles WHERE permissions LIKE '%playbook%';
+  DELETE FROM temp_roles WHERE permissions LIKE '%custom_group%';
+  DELETE FROM temp_roles WHERE permissions LIKE 'run_create';
+  DELETE FROM temp_roles WHERE permissions LIKE 'run_manage_members';
+  DELETE FROM temp_roles WHERE permissions LIKE 'run_manage_properties';
+  DELETE FROM temp_roles WHERE permissions LIKE 'run_view';
 
   UPDATE
     Roles INNER JOIN (
