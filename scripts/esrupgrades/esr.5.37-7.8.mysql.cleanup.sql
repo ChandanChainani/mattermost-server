@@ -140,10 +140,14 @@ CREATE PROCEDURE splitString(
 )
 BEGIN
   DECLARE idx INT DEFAULT 0;
+  DECLARE splitRole TEXT DEFAULT '';
   SELECT TRIM(inputString) INTO inputString;
   SELECT LOCATE(delimiterChar, inputString) INTO idx;
   WHILE idx > 0 DO
-    INSERT INTO temp_roles SELECT id, TRIM(LEFT(inputString, idx));
+    SET splitRole = TRIM(LEFT(inputString, idx));
+	IF splitRole NOT LIKE '%playbook%' AND splitRole NOT LIKE '%custom_group%' THEN
+		INSERT INTO temp_roles SELECT id, splitRole;
+	END IF;
     SELECT SUBSTR(inputString, idx+1) INTO inputString;
     SELECT LOCATE(delimiterChar, inputString) INTO idx;
   END WHILE;
