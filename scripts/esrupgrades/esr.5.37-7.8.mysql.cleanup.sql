@@ -17,21 +17,35 @@ UPDATE ThreadMemberships SET LastUpdated = 1;
 UPDATE Systems SET Value = 1 WHERE Name = 'LastSecurityTime';
 
 /* The server migration may contain a row in the Systems table marking the onboarding as complete.
-   There are no migrations related to this, so we can simply drop it here */
+   There are no migrations related to this, so we can simply drop it here. */
 DELETE FROM Systems WHERE Name = 'FirstAdminSetupComplete';
 
-/* When migrating through the server, Playbooks adds some new rows to the Roles and Systems tables,
-   which are not present in the script migration. We drop such rows here */
+/* The server migration contains an in-app migration that adds new roles for Playbooks:
+   doPlaybooksRolesCreationMigration, defined in https://github.com/mattermost/mattermost-server/blob/282bd351e3767dcfd8c8340da2e0915197c0dbcb/app/migrations.go#L345-L469
+   The roles are the ones defined in https://github.com/mattermost/mattermost-server/blob/282bd351e3767dcfd8c8340da2e0915197c0dbcb/model/role.go#L874-L929
+   When this migration finishes, it also adds a new row to the Systems table with the key of the migration.
+   This in-app migration does not happen in the script, so we remove those rows here. */
 DELETE FROM Roles WHERE Name = 'playbook_member';
 DELETE FROM Roles WHERE Name = 'playbook_admin';
 DELETE FROM Roles WHERE Name = 'run_member';
 DELETE FROM Roles WHERE Name = 'run_admin';
 DELETE FROM Systems WHERE Name = 'PlaybookRolesCreationMigrationComplete';
+
+/* The server migration contains two in-app migrations that add playbooks permissions to certain roles:
+    getAddPlaybooksPermissions and getPlaybooksPermissionsAddManageRoles, defined in https://github.com/mattermost/mattermost-server/blob/282bd351e3767dcfd8c8340da2e0915197c0dbcb/app/permissions_migrations.go#L1021-L1072
+    The specific roles ('%playbook%') are removed in the procedure below, but the migrations also add new rows to the Systems table marking the migrations as complete.
+    These in-app migrations do not happen in the script, so we remove those rows here. */
 DELETE FROM Systems WHERE Name = 'playbooks_manage_roles';
 DELETE FROM Systems WHERE Name = 'playbooks_permissions';
 
-/* When migrating through the server, Boards adds a row to the Systems table. We drop it here */
+/* The server migration contains an in-app migration that adds boards permissions to certain roles:
+   getProductsBoardsPermissions, defined in https://github.com/mattermost/mattermost-server/blob/282bd351e3767dcfd8c8340da2e0915197c0dbcb/app/permissions_migrations.go#L1074-L1093
+   The specific roles (sysconsole_read_product_boards and sysconsole_write_product_boards) are removed in the procedure below,
+   but the migrations also adds a new row to the Systems table marking the migrations as complete.
+   This in-app migration does not happen in the script, so we remove that rows here. */
 DELETE FROM Systems WHERE Name = 'products_boards';
+
+/* TODO: REVIEW STARTING HERE */
 
 /* doRemainingSchemaMigrations adds an ID to the TeamInviteId column in the Teams table. Something like:
        Get all affected teams with SELECT * FROM Teams WHERE InviteId = ''
@@ -129,29 +143,26 @@ DROP PROCEDURE IF EXISTS splitString;
 DROP PROCEDURE IF EXISTS sortPermissionsInRoles;
 
 DROP TEMPORARY TABLE IF EXISTS temp_roles;
-CREATE TEMPORARY TABLE temp_roles(id varchar(26), permissions longtext);
+CREATE TEMPORARY TABLE temp_roles(id varchar(26), permission longtext);
 
 DELIMITER //
 
-CREATE PROCEDURE splitString(
+CREATE PROCEDURE splitPermissions(
   IN id varchar(26),
-  IN inputString longtext,
-  IN delimiterChar text
+  IN permissionsString longtext
 )
 BEGIN
   DECLARE idx INT DEFAULT 0;
-  SELECT TRIM(inputString) INTO inputString;
-  SELECT LOCATE(delimiterChar, inputString) INTO idx;
+  SELECT TRIM(permissionsString) INTO permissionsString;
+  SELECT LOCATE(' ', permissionsString) INTO idx;
   WHILE idx > 0 DO
-    INSERT INTO temp_roles SELECT id, TRIM(LEFT(inputString, idx));
-    SELECT SUBSTR(inputString, idx+1) INTO inputString;
-    SELECT LOCATE(delimiterChar, inputString) INTO idx;
+    INSERT INTO temp_roles SELECT id, TRIM(LEFT(permissionsString, idx));
+    SELECT SUBSTR(permissionsString, idx+1) INTO permissionsString;
+    SELECT LOCATE(' ', permissionsString) INTO idx;
   END WHILE;
-  INSERT INTO temp_roles(id, permissions) VALUES(id, TRIM(inputString));
+  INSERT INTO temp_roles(id, permission) VALUES(id, TRIM(permissionsString));
 END; //
-DELIMITER ;
 
-DELIMITER //
 CREATE PROCEDURE sortPermissionsInRoles()
 BEGIN
   DECLARE done INT DEFAULT FALSE;
@@ -166,22 +177,22 @@ BEGIN
     IF done THEN
       LEAVE read_loop;
     END IF;
-    CALL splitString(rolesId, rolesPermissions, ' ');
+    CALL splitPermissions(rolesId, rolesPermissions);
   END LOOP;
   CLOSE cur1;
 
-  DELETE FROM temp_roles WHERE permissions LIKE 'sysconsole_read_products_boards';
-  DELETE FROM temp_roles WHERE permissions LIKE 'sysconsole_write_products_boards';
-  DELETE FROM temp_roles WHERE permissions LIKE '%playbook%';
-  DELETE FROM temp_roles WHERE permissions LIKE '%custom_group%';
-  DELETE FROM temp_roles WHERE permissions LIKE 'run_create';
-  DELETE FROM temp_roles WHERE permissions LIKE 'run_manage_members';
-  DELETE FROM temp_roles WHERE permissions LIKE 'run_manage_properties';
-  DELETE FROM temp_roles WHERE permissions LIKE 'run_view';
+  DELETE FROM temp_roles WHERE permission LIKE 'sysconsole_read_products_boards';
+  DELETE FROM temp_roles WHERE permission LIKE 'sysconsole_write_products_boards';
+  DELETE FROM temp_roles WHERE permission LIKE '%playbook%';
+  DELETE FROM temp_roles WHERE permission LIKE '%custom_group%';
+  DELETE FROM temp_roles WHERE permission LIKE 'run_create';
+  DELETE FROM temp_roles WHERE permission LIKE 'run_manage_members';
+  DELETE FROM temp_roles WHERE permission LIKE 'run_manage_properties';
+  DELETE FROM temp_roles WHERE permission LIKE 'run_view';
 
   UPDATE
     Roles INNER JOIN (
-      SELECT temp_roles.id as Id, TRIM(group_concat(temp_roles.permissions ORDER BY temp_roles.permissions SEPARATOR ' ')) as Permissions
+      SELECT temp_roles.id as Id, TRIM(group_concat(temp_roles.permission ORDER BY temp_roles.permission SEPARATOR ' ')) as Permissions
         FROM Roles JOIN temp_roles ON Roles.Id = temp_roles.id
         GROUP BY temp_roles.id
     ) AS Sorted
